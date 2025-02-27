@@ -13,6 +13,7 @@ from datetime import datetime, timedelta
 
 import gymnasium as gym
 from gymnasium.wrappers import RecordVideo
+import optax  # Add this import for Adam optimizer.
 
 # Starting learning rate.
 LEARNING_RATE = 1e-3
@@ -202,15 +203,6 @@ def collect_episode_gradients(env, params, rng_key):
     
     return grad_accumulator, total_reward, objective_value
 
-# Apply accumulated gradients to update parameters.
-def apply_gradients(params, gradients, learning_rate):
-    """Apply accumulated gradients to parameters."""
-    return jax.tree.map(
-        lambda p, g: p + learning_rate * g,
-        params,
-        gradients
-    )
-
 # Main training loop with episodic updates.
 def train_reinforce(
     num_episodes=NUM_EPISODES,
@@ -250,6 +242,10 @@ def train_reinforce(
     
     # Current learning rate.
     current_lr = learning_rate
+    
+    # Initialize Adam optimizer.
+    optimizer = optax.adam(learning_rate=current_lr)
+    opt_state = optimizer.init(params)
     
     # Track highest reward threshold reached to prevent regression.
     highest_threshold_reached = -float('inf')
@@ -306,8 +302,11 @@ def train_reinforce(
                 record_env.close()
                 print(f"Recorded episode reward: {replay_reward:.2f}")
         
-        # Apply accumulated gradients to update parameters.
-        params = apply_gradients(params, gradients, current_lr)
+        # Use Adam optimizer to update parameters (instead of direct gradient application).
+        # Note: We invert the sign of gradients since Adam minimizes loss but we want to maximize rewards.
+        negative_gradients = jax.tree.map(lambda g: -g, gradients)
+        updates, opt_state = optimizer.update(negative_gradients, opt_state)
+        params = optax.apply_updates(params, updates)
         
         episode_rewards.append(total_reward)
         
@@ -323,11 +322,15 @@ def train_reinforce(
                     new_lr = lr
                     highest_threshold_reached = threshold
             
-            # If learning rate changed, update it.
+            # If learning rate changed, update the optimizer.
             if new_lr != current_lr:
                 print(f"Episode {episode}: Average reward {avg_reward:.2f} reached threshold {highest_threshold_reached}. "
                     f"Changing learning rate from {current_lr} to {new_lr}.")
                 current_lr = new_lr
+                # Create a new optimizer with updated learning rate.
+                optimizer = optax.adam(learning_rate=current_lr)
+                # Reinitialize the optimizer state with the current parameters.
+                opt_state = optimizer.init(params)
         
         # Save weights periodically.
         if episode % save_frequency == 0 or episode == num_episodes - 1:
