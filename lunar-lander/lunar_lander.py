@@ -43,8 +43,8 @@ class LunarLanderNetwork(hk.Module):
     
     Architecture:
     - Input layer: 8 neurons (state observations)
-    - Hidden layer 1: 1024 neurons with bias, and ReLU activation
-    - Hidden layer 2: 1024 neurons with bias, and ReLU activation
+    - Hidden layer 1: 512 neurons with bias, and ReLU activation
+    - Hidden layer 2: 512 neurons with bias, and ReLU activation
     - Hidden layer 3: 512 neurons with bias, and ReLU activation
     - Output layer: 4 neurons with softmax activation (action probabilities)
     
@@ -66,11 +66,11 @@ class LunarLanderNetwork(hk.Module):
             Action probabilities with shape [batch_size, 4].
         """
         x = observations
-        x = hk.Linear(1024)(x)
+        x = hk.Linear(512)(x)
         x = jax.nn.relu(x)
-        x = hk.Linear(1024)(x)
+        x = hk.Linear(512)(x)
         x = jax.nn.relu(x)
-        x = hk.Linear(1024)(x)
+        x = hk.Linear(512)(x)
         x = jax.nn.relu(x)
         x = hk.Linear(512)(x)
         x = jax.nn.relu(x)
