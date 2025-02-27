@@ -10,7 +10,6 @@ import glob
 import pickle
 import time
 from datetime import datetime, timedelta
-from typing import Sequence, Tuple, Dict, List
 
 import gymnasium as gym
 from gymnasium.wrappers import RecordVideo
