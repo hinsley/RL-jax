@@ -32,9 +32,11 @@ LR_SCHEDULE = [
 # Whether to load existing weights or start fresh.
 LOAD_EXISTING_WEIGHTS = True
 # How often to save weights during training (in episodes).
-SAVE_FREQUENCY = 50
+SAVE_FREQUENCY = 500
 # Whether to render (display) every episode during training.
 RENDER_ALL_EPISODES = False
+# Whether to record video of the best episode.
+RECORD_BEST_EPISODE = False
 
 class LunarLanderNetwork(hk.Module):
     """Neural network for the Lunar Lander environment.
@@ -262,29 +264,16 @@ def train_reinforce(
     video_dir = os.path.join("./lunar-lander", "videos")
     os.makedirs(video_dir, exist_ok=True)
     
-    # Flag to record video in the next episode.
-    record_next_episode = False
-    
     # Training loop.
     for episode in range(num_episodes):
         # Split RNG key for this episode.
         rng_key, collect_key = jax.random.split(rng_key)
         
-        # Create a rendering or recording environment if needed.
-        if record_next_episode:
-            # Record video when we've just seen a new max reward.
-            record_env = gym.make("LunarLander-v3", render_mode="rgb_array")
-            record_env = RecordVideo(
-                record_env, 
-                video_dir,
-                name_prefix=f"max_reward_{max_reward:.2f}",
-                episode_trigger=lambda x: True  # Record this episode.
-            )
-            gradients, total_reward, objective = collect_episode_gradients(
-                record_env, params, collect_key)
-            record_env.close()
-            record_next_episode = False
-        elif RENDER_ALL_EPISODES or episode % render_every == 0:
+        # Track if this episode should be recorded.
+        should_record = RENDER_ALL_EPISODES or episode % render_every == 0
+        
+        # Collect episode gradients and reward.
+        if should_record:
             render_env = gym.make("LunarLander-v3", render_mode="human")
             gradients, total_reward, objective = collect_episode_gradients(
                 render_env, params, collect_key)
@@ -293,16 +282,31 @@ def train_reinforce(
             gradients, total_reward, objective = collect_episode_gradients(
                 env, params, collect_key)
         
-        # Apply accumulated gradients to update parameters.
-        params = apply_gradients(params, gradients, current_lr)
-        
-        episode_rewards.append(total_reward)
-        
         # Check if we've achieved a new maximum reward.
         if total_reward > max_reward:
             print(f"New maximum reward: {total_reward:.2f} (previous: {max_reward:.2f})")
             max_reward = total_reward
-            record_next_episode = True
+            
+            # If RECORD_BEST_EPISODE is True, re-run the episode with recording enabled
+            if RECORD_BEST_EPISODE:
+                print(f"Recording new best episode with reward: {total_reward:.2f}")
+                record_env = gym.make("LunarLander-v3", render_mode="rgb_array")
+                record_env = RecordVideo(
+                    record_env, 
+                    video_dir,
+                    name_prefix=f"max_reward_{total_reward:.2f}",
+                    episode_trigger=lambda x: True  # Record this episode
+                )
+                # Re-run the same episode with the same parameters and RNG key
+                _, replay_reward, _ = collect_episode_gradients(
+                    record_env, params, collect_key)
+                record_env.close()
+                print(f"Recorded episode reward: {replay_reward:.2f}")
+        
+        # Apply accumulated gradients to update parameters.
+        params = apply_gradients(params, gradients, current_lr)
+        
+        episode_rewards.append(total_reward)
         
         # Check if we should update the learning rate based on average reward.
         if episode >= LR_SCHEDULE_AVERAGE_N - 1:
