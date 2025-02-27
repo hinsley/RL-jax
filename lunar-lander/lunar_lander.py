@@ -16,7 +16,7 @@ from gymnasium.wrappers import RecordVideo
 import optax  # Add this import for Adam optimizer.
 
 # Starting learning rate.
-LEARNING_RATE = 1e-3
+LEARNING_RATE = 1e-4
 # Discount factor for future rewards.
 GAMMA = 0.99
 # Total number of episodes to train for.
@@ -24,12 +24,12 @@ NUM_EPISODES = 10000
 # Number of episodes to average for learning rate schedule checks.
 LR_SCHEDULE_AVERAGE_N = 20
 # Learning rate schedule: (reward_threshold, new_learning_rate) pairs.
-LR_SCHEDULE = [
-    (50, 3e-4),
-    (100, 1e-4),
-    (200, 3e-5),
-]
-# LR_SCHEDULE = []
+# LR_SCHEDULE = [
+#     (50, 3e-4),
+#     (100, 1e-4),
+#     (200, 3e-5),
+# ]
+LR_SCHEDULE = []
 # Whether to load existing weights or start fresh.
 LOAD_EXISTING_WEIGHTS = True
 # How often to save weights during training (in episodes).
