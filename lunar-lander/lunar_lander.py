@@ -4,7 +4,6 @@ random.seed(0)
 import haiku as hk
 import jax
 import jax.numpy as jnp
-import optax
 import numpy as np
 import os
 import glob
