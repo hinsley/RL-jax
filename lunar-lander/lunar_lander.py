@@ -8,7 +8,8 @@ import numpy as np
 import os
 import glob
 import pickle
-from datetime import datetime
+import time
+from datetime import datetime, timedelta
 from typing import Sequence, Tuple, Dict, List
 
 import gymnasium as gym
@@ -264,6 +265,9 @@ def train_reinforce(
     video_dir = os.path.join("./lunar-lander", "videos")
     os.makedirs(video_dir, exist_ok=True)
     
+    # Time tracking.
+    start_time = time.time()
+    
     # Training loop.
     for episode in range(num_episodes):
         # Split RNG key for this episode.
@@ -335,6 +339,20 @@ def train_reinforce(
             avg_reward = np.mean(episode_rewards[-10:]) if episode > 0 else total_reward
             print(f"Episode {episode}, Loss: {objective:.4f}, Reward: {total_reward:.2f}, "
                   f"Avg Reward (last 10): {avg_reward:.2f}, LR: {current_lr}")
+            
+            # Print time information every 10 episodes.
+            if episode % 10 == 0 and episode > 0:
+                elapsed_time = time.time() - start_time
+                elapsed_str = str(timedelta(seconds=int(elapsed_time)))
+                
+                # Estimate remaining time.
+                episodes_done = episode + 1
+                episodes_remaining = num_episodes - episodes_done
+                seconds_per_episode = elapsed_time / episodes_done
+                remaining_time = episodes_remaining * seconds_per_episode
+                remaining_str = str(timedelta(seconds=int(remaining_time)))
+                
+                print(f"Time elapsed: {elapsed_str}, Estimated time remaining: {remaining_str}")
     
     env.close()
     return params
