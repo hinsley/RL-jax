@@ -5,6 +5,7 @@ import haiku as hk
 import jax
 import jax.numpy as jnp
 import numpy as np
+import optax
 import os
 import glob
 import pickle
@@ -13,10 +14,9 @@ from datetime import datetime, timedelta
 
 import gymnasium as gym
 from gymnasium.wrappers import RecordVideo
-import optax  # Add this import for Adam optimizer.
 
 # Starting learning rate.
-LEARNING_RATE = 1e-4
+LEARNING_RATE = 1e-5
 # Discount factor for future rewards.
 GAMMA = 0.99
 # Total number of episodes to train for.
@@ -37,16 +37,16 @@ SAVE_FREQUENCY = 500
 # Whether to render (display) every episode during training.
 RENDER_ALL_EPISODES = False
 # Whether to record video of the best episode.
-RECORD_BEST_EPISODE = False
+RECORD_BEST_EPISODE = True
 
 class LunarLanderNetwork(hk.Module):
     """Neural network for the Lunar Lander environment.
     
     Architecture:
     - Input layer: 8 neurons (state observations)
-    - Hidden layer 1: 512 neurons with bias, and ReLU activation
-    - Hidden layer 2: 512 neurons with bias, and ReLU activation
-    - Hidden layer 3: 512 neurons with bias, and ReLU activation
+    - Hidden layer 1: 512 neurons with bias and ReLU activation
+    - Hidden layer 2: 512 neurons with bias and ReLU activation
+    - Hidden layer 3: 512 neurons with bias and ReLU activation
     - Output layer: 4 neurons with softmax activation (action probabilities)
     
     LayerNorm is applied after each linear layer to normalize activations,
@@ -269,38 +269,63 @@ def train_reinforce(
         rng_key, collect_key = jax.random.split(rng_key)
         
         # Track if this episode should be recorded.
-        should_record = RENDER_ALL_EPISODES or episode % render_every == 0
+        should_record_for_viewing = RENDER_ALL_EPISODES or episode % render_every == 0
         
-        # Collect episode gradients and reward.
-        if should_record:
-            render_env = gym.make("LunarLander-v3", render_mode="human")
-            gradients, total_reward, objective = collect_episode_gradients(
-                render_env, params, collect_key)
-            render_env.close()
+        # Handle video recording
+        latest_video_path = None
+        if RECORD_BEST_EPISODE:
+            # Always record if we're tracking best episodes
+            record_env = gym.make("LunarLander-v3", render_mode="rgb_array")
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            episode_prefix = f"episode_{episode}_{timestamp}"
+            record_env = RecordVideo(
+                record_env,
+                video_dir,
+                name_prefix=episode_prefix,
+                episode_trigger=lambda x: True  # Always record
+            )
+            # Store current video directory to find the file later
+            latest_video_path = os.path.join(video_dir, f"{episode_prefix}")
+            episode_env = record_env
+        elif should_record_for_viewing:
+            # Just render for viewing
+            episode_env = gym.make("LunarLander-v3", render_mode="human")
         else:
-            gradients, total_reward, objective = collect_episode_gradients(
-                env, params, collect_key)
+            # No recording or rendering
+            episode_env = env
         
-        # Check if we've achieved a new maximum reward.
+        # Collect episode gradients and reward
+        gradients, total_reward, objective = collect_episode_gradients(
+            episode_env, params, collect_key)
+        
+        # Close any environment that was created for this episode
+        if episode_env is not env:
+            episode_env.close()
+        
+        # Check if we've achieved a new maximum reward
         if total_reward > max_reward:
             print(f"New maximum reward: {total_reward:.2f} (previous: {max_reward:.2f})")
             max_reward = total_reward
             
-            # If RECORD_BEST_EPISODE is True, re-run the episode with recording enabled
-            if RECORD_BEST_EPISODE:
-                print(f"Recording new best episode with reward: {total_reward:.2f}")
-                record_env = gym.make("LunarLander-v3", render_mode="rgb_array")
-                record_env = RecordVideo(
-                    record_env, 
-                    video_dir,
-                    name_prefix=f"max_reward_{total_reward:.2f}",
-                    episode_trigger=lambda x: True  # Record this episode
-                )
-                # Re-run the same episode with the same parameters and RNG key
-                _, replay_reward, _ = collect_episode_gradients(
-                    record_env, params, collect_key)
-                record_env.close()
-                print(f"Recorded episode reward: {replay_reward:.2f}")
+            # If we recorded this episode and it's a new best, rename the video file
+            if RECORD_BEST_EPISODE and latest_video_path is not None:
+                # Find the recorded video file (it will have a timestamp and .mp4 extension)
+                video_files = glob.glob(f"{latest_video_path}*.mp4")
+                if video_files:
+                    # Rename the first matching file (should only be one)
+                    old_path = video_files[0]
+                    new_path = os.path.join(
+                        video_dir, 
+                        f"max_reward_{total_reward:.2f}_{timestamp}.mp4"
+                    )
+                    os.rename(old_path, new_path)
+                    print(f"Saved new best episode video: {new_path}")
+        elif RECORD_BEST_EPISODE and latest_video_path is not None:
+            # Not a new maximum reward, delete the video file
+            video_files = glob.glob(f"{latest_video_path}*.mp4")
+            for video_file in video_files:
+                os.remove(video_file)
+                print(f"Deleted non-best episode video: {video_file}")
         
         # Use Adam optimizer to update parameters (instead of direct gradient application).
         # Note: We invert the sign of gradients since Adam minimizes loss but we want to maximize rewards.
