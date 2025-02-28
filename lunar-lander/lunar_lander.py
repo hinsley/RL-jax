@@ -35,9 +35,9 @@ LOAD_EXISTING_WEIGHTS = True
 # How often to save weights during training (in episodes).
 SAVE_FREQUENCY = 500
 # Whether to render (display) every episode during training.
-RENDER_ALL_EPISODES = False
+RENDER_ALL_EPISODES = True
 # Whether to record video of the best episode.
-RECORD_BEST_EPISODE = True
+RECORD_BEST_EPISODE = False
 
 class LunarLanderNetwork(hk.Module):
     """Neural network for the Lunar Lander environment.
@@ -268,39 +268,62 @@ def train_reinforce(
         # Split RNG key for this episode.
         rng_key, collect_key = jax.random.split(rng_key)
         
-        # Track if this episode should be recorded.
-        should_record_for_viewing = RENDER_ALL_EPISODES or episode % render_every == 0
+        # Track if this episode should be rendered.
+        should_render = RENDER_ALL_EPISODES or episode % render_every == 0
         
-        # Handle video recording
+        # Handle environment setup with proper rendering and recording
         latest_video_path = None
+        
         if RECORD_BEST_EPISODE:
-            # Always record if we're tracking best episodes
-            record_env = gym.make("LunarLander-v3", render_mode="rgb_array")
+            # Set up recording environment
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             episode_prefix = f"episode_{episode}_{timestamp}"
-            record_env = RecordVideo(
-                record_env,
-                video_dir,
-                name_prefix=episode_prefix,
-                episode_trigger=lambda x: True  # Always record
-            )
-            # Store current video directory to find the file later
             latest_video_path = os.path.join(video_dir, f"{episode_prefix}")
-            episode_env = record_env
-        elif should_record_for_viewing:
-            # Just render for viewing
-            episode_env = gym.make("LunarLander-v3", render_mode="human")
+            
+            if should_render:
+                # We want to both render and record
+                # First create a human-viewable environment
+                render_env = gym.make("LunarLander-v3", render_mode="human")
+                # Run the episode for viewing
+                gradients, total_reward, objective = collect_episode_gradients(
+                    render_env, params, collect_key)
+                render_env.close()
+                
+                # Then create a recording environment and run again to record
+                record_env = gym.make("LunarLander-v3", render_mode="rgb_array")
+                record_env = RecordVideo(
+                    record_env,
+                    video_dir,
+                    name_prefix=episode_prefix,
+                    episode_trigger=lambda x: True  # Always record
+                )
+                # We need a new key for the second run
+                rng_key, record_key = jax.random.split(rng_key)
+                # Just collect the episode for recording, ignoring the returns
+                _, _, _ = collect_episode_gradients(record_env, params, record_key)
+                record_env.close()
+            else:
+                # Just record without rendering
+                record_env = gym.make("LunarLander-v3", render_mode="rgb_array")
+                record_env = RecordVideo(
+                    record_env,
+                    video_dir,
+                    name_prefix=episode_prefix,
+                    episode_trigger=lambda x: True  # Always record
+                )
+                gradients, total_reward, objective = collect_episode_gradients(
+                    record_env, params, collect_key)
+                record_env.close()
+        elif should_render:
+            # Just render for viewing without recording
+            render_env = gym.make("LunarLander-v3", render_mode="human")
+            gradients, total_reward, objective = collect_episode_gradients(
+                render_env, params, collect_key)
+            render_env.close()
         else:
-            # No recording or rendering
-            episode_env = env
-        
-        # Collect episode gradients and reward
-        gradients, total_reward, objective = collect_episode_gradients(
-            episode_env, params, collect_key)
-        
-        # Close any environment that was created for this episode
-        if episode_env is not env:
-            episode_env.close()
+            # No rendering or recording
+            gradients, total_reward, objective = collect_episode_gradients(
+                env, params, collect_key)
         
         # Check if we've achieved a new maximum reward
         if total_reward > max_reward:
